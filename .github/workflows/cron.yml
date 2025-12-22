@@ -1,0 +1,30 @@
+name: Sentinel Scheduled Jobs
+
+on:
+  schedule:
+    # Monthly lifeboat reset — 1st day of month at 00:00 UTC
+    - cron: "0 0 1 * *"
+
+    # Daily consistency score — every day at 00:00 UTC
+    - cron: "0 0 * * *"
+
+  # Allow manual trigger from GitHub UI
+  workflow_dispatch:
+
+jobs:
+  run-cron-jobs:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Call lifeboat reset
+        run: |
+          curl -X POST \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            -H "Content-Type: application/json" \
+            https://YOUR_PROJECT_ID.supabase.co/functions/v1/lifeboat-reset
+
+      - name: Call consistency score
+        run: |
+          curl -X POST \
+            -H "Content-Type: application/json" \
+            https://YOUR_PROJECT_ID.supabase.co/functions/v1/consistency-score
