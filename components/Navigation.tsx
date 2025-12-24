@@ -91,18 +91,16 @@ export default function Navigation() {
             <div className="border-l border-zinc-700" />
 
             {/* Logout */}
-            <form action={signOut}>
-              <button
-  type="button"
-  onClick={async () => {
-    await signOut()
-  }}
-  className="text-sm font-medium text-zinc-400 hover:text-red-400 transition"
->
-  Logout
-</button>
+            <button
+               type="button"
+                 onClick={async () => {
+                   await signOut()
+                  }}
+                className="text-sm font-medium text-zinc-400 hover:text-red-400 transition"
+                  >
+                Logout
+                </button>
 
-            </form>
           </div>
         </div>
       </div>
