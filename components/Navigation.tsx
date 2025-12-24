@@ -93,11 +93,15 @@ export default function Navigation() {
             {/* Logout */}
             <form action={signOut}>
               <button
-                type="submit"
-                className="text-sm font-medium text-zinc-400 hover:text-red-400 transition"
-              >
-                Logout
-              </button>
+  type="button"
+  onClick={async () => {
+    await signOut()
+  }}
+  className="text-sm font-medium text-zinc-400 hover:text-red-400 transition"
+>
+  Logout
+</button>
+
             </form>
           </div>
         </div>
