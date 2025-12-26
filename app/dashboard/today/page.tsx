@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { createClient } from '@/lib/supabase/client'
 
@@ -9,6 +9,7 @@ interface Activity {
   name: string
   importance: 'low' | 'medium' | 'high' | 'critical'
   target_frequency: number
+  description?: string | null
 }
 
 interface Streak {
@@ -22,6 +23,19 @@ interface Log {
   activity_id: string
 }
 
+type Importance = 'low' | 'medium' | 'high' | 'critical'
+
+// Custom hook to prevent stale closures
+function useEvent<T extends (...args: any[]) => any>(callback: T): T {
+  const callbackRef = useRef(callback)
+  
+  useEffect(() => {
+    callbackRef.current = callback
+  })
+  
+  return useCallback(((...args) => callbackRef.current(...args)) as T, [])
+}
+
 export default function CommandCenter() {
   const [command, setCommand] = useState('')
   const [activities, setActivities] = useState<Activity[]>([])
@@ -32,60 +46,21 @@ export default function CommandCenter() {
   const [toast, setToast] = useState<string | null>(null)
   const [score, setScore] = useState(0)
   const [loading, setLoading] = useState(true)
+  const [hoveredId, setHoveredId] = useState<string | null>(null)
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [deleteConfirmId, setDeleteConfirmId] = useState<string | null>(null)
+  const [editForm, setEditForm] = useState({
+    name: '',
+    description: '',
+    importance: 'medium' as Importance,
+    target_frequency: 7
+  })
+  
   const inputRef = useRef<HTMLInputElement>(null)
   const router = useRouter()
   const supabase = createClient()
 
-  useEffect(() => {
-    loadData()
-    inputRef.current?.focus()
-  }, [])
-
-  // Keyboard shortcuts
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      const modifierKey = e.metaKey || e.ctrlKey
-
-      if (modifierKey && e.key === 'n') {
-        e.preventDefault()
-        router.push('/dashboard/forge')
-      }
-
-      if (modifierKey && e.key === 'z') {
-        e.preventDefault()
-        handleUndo()
-      }
-
-      if (document.activeElement?.tagName === 'INPUT') {
-        return
-      }
-
-      if (e.key === 'Escape') {
-        setCommand('')
-        setSelectedIndex(0)
-      }
-
-      if (e.key === 'j') {
-        e.preventDefault()
-        setSelectedIndex((prev) => Math.min(prev + 1, activities.length - 1))
-      }
-
-      if (e.key === 'k') {
-        e.preventDefault()
-        setSelectedIndex((prev) => Math.max(prev - 1, 0))
-      }
-
-      if (e.key === 'Enter' && command.trim()) {
-        e.preventDefault()
-        handleSubmit()
-      }
-    }
-
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [command, activities, router])
-
-  async function loadData() {
+  const loadData = useCallback(async () => {
     setLoading(true)
     
     const { data: { user } } = await supabase.auth.getUser()
@@ -122,9 +97,59 @@ export default function CommandCenter() {
     setLogs(logsRes.data || [])
     setScore(profileRes.data?.consistency_score || 0)
     setLoading(false)
+  }, [supabase, router])
+
+  useEffect(() => {
+    loadData()
+    inputRef.current?.focus()
+  }, [loadData])
+
+  function startEdit(activity: Activity) {
+    setEditingId(activity.id)
+    setEditForm({
+      name: activity.name,
+      description: activity.description || '',
+      importance: activity.importance,
+      target_frequency: activity.target_frequency
+    })
   }
 
-  async function handleSubmit() {
+  async function saveEdit(activityId: string) {
+    const { error } = await supabase
+      .from('activities')
+      .update({
+        name: editForm.name.trim(),
+        description: editForm.description.trim() || null,
+        importance: editForm.importance,
+        target_frequency: editForm.target_frequency
+      })
+      .eq('id', activityId)
+
+    if (!error) {
+      setEditingId(null)
+      loadData()
+      showToast('Habit updated')
+    }
+  }
+
+  function cancelEdit() {
+    setEditingId(null)
+  }
+
+  async function deleteHabit(activityId: string) {
+    const { error } = await supabase
+      .from('activities')
+      .delete()
+      .eq('id', activityId)
+
+    if (!error) {
+      setDeleteConfirmId(null)
+      loadData()
+      showToast('Habit deleted')
+    }
+  }
+
+  async function handleSubmitInternal() {
     if (!command.trim()) return
 
     const match = activities.find(a => 
@@ -166,7 +191,7 @@ export default function CommandCenter() {
     }
   }
 
-  async function handleUndo() {
+  async function handleUndoInternal() {
     if (!lastLogId) return
 
     const { error } = await supabase
@@ -180,6 +205,81 @@ export default function CommandCenter() {
       showToast('Undone')
     }
   }
+
+  // Stable event handlers that always use latest state
+  const handleSubmit = useEvent(handleSubmitInternal)
+  const handleUndo = useEvent(handleUndoInternal)
+
+  // Keyboard shortcuts
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const modifierKey = e.metaKey || e.ctrlKey
+
+      if (modifierKey && e.key === 'n') {
+        e.preventDefault()
+        router.push('/dashboard/forge')
+      }
+
+      if (modifierKey && e.key === 'z') {
+        e.preventDefault()
+        handleUndo()
+      }
+
+      if (document.activeElement?.tagName === 'INPUT') {
+        if (e.key === 'Escape') {
+          if (editingId) {
+            cancelEdit()
+          } else {
+            setCommand('')
+            setSelectedIndex(0)
+          }
+          return
+        }
+        if (e.key === 'Enter' && !editingId) {
+          e.preventDefault()
+          handleSubmit()
+        }
+        if (e.key === 'Enter' && editingId) {
+          e.preventDefault()
+          saveEdit(editingId)
+        }
+        return
+      }
+
+      // Block shortcuts during edit mode
+      if (editingId) return
+
+      if (e.key === 'e' && activities[selectedIndex]) {
+        e.preventDefault()
+        startEdit(activities[selectedIndex])
+        return
+      }
+
+      if (e.shiftKey && e.key === 'D' && activities[selectedIndex]) {
+        e.preventDefault()
+        deleteHabit(activities[selectedIndex].id)
+        return
+      }
+
+      if (e.key === 'Escape') {
+        setCommand('')
+        setSelectedIndex(0)
+      }
+
+      if (e.key === 'j') {
+        e.preventDefault()
+        setSelectedIndex((prev) => Math.min(prev + 1, activities.length - 1))
+      }
+
+      if (e.key === 'k') {
+        e.preventDefault()
+        setSelectedIndex((prev) => Math.max(prev - 1, 0))
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [activities.length, handleSubmit, handleUndo, router, editingId, activities, selectedIndex])
 
   function showToast(message: string) {
     setToast(message)
@@ -239,26 +339,127 @@ export default function CommandCenter() {
           const logged = isLogged(activity.id)
           const streak = getStreak(activity.id)
           const selected = idx === selectedIndex
+          const isEditing = editingId === activity.id
+          const isHovered = hoveredId === activity.id
+
+          if (isEditing) {
+            return (
+              <div key={activity.id} className="px-4 py-2 bg-surface border-l-2 border-blue-500">
+                <input
+                  type="text"
+                  value={editForm.name}
+                  onChange={e => setEditForm(prev => ({ ...prev, name: e.target.value }))}
+                  className="w-full bg-transparent border-b border-zinc-700 text-sm outline-none mb-2 text-white"
+                  autoFocus
+                />
+                <input
+                  type="text"
+                  value={editForm.description}
+                  onChange={e => setEditForm(prev => ({ ...prev, description: e.target.value }))}
+                  placeholder="Description (optional)"
+                  className="w-full bg-transparent text-xs text-zinc-400 outline-none mb-2"
+                />
+                <div className="flex gap-2 items-center">
+                  <select
+                    value={editForm.importance}
+                    onChange={e => setEditForm(prev => ({ ...prev, importance: e.target.value as Importance }))}
+                    className="bg-zinc-900 text-xs px-2 py-1 rounded outline-none text-white"
+                  >
+                    <option value="low">Low</option>
+                    <option value="medium">Medium</option>
+                    <option value="high">High</option>
+                    <option value="critical">Critical</option>
+                  </select>
+                  <input
+                    type="number"
+                    value={editForm.target_frequency}
+                    onChange={e => setEditForm(prev => ({ ...prev, target_frequency: Number(e.target.value) }))}
+                    min={1}
+                    max={7}
+                    className="bg-zinc-900 text-xs px-2 py-1 w-16 rounded outline-none text-white"
+                  />
+                  <span className="text-xs text-zinc-600">days/week</span>
+                  <div className="flex-1" />
+                  <button
+                    onClick={() => saveEdit(activity.id)}
+                    className="text-xs text-blue-400 hover:text-blue-300"
+                  >
+                    Save
+                  </button>
+                  <button
+                    onClick={cancelEdit}
+                    className="text-xs text-zinc-400 hover:text-zinc-300"
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </div>
+            )
+          }
 
           return (
             <div
               key={activity.id}
-              className={`h-8 px-4 flex items-center gap-3 cursor-pointer transition ${
+              className={`px-4 py-1 flex flex-col cursor-pointer transition ${
                 selected ? 'bg-surface' : 'hover:bg-surface/50'
               }`}
               onClick={() => {
                 setCommand(activity.name)
                 inputRef.current?.focus()
               }}
+              onMouseEnter={() => setHoveredId(activity.id)}
+              onMouseLeave={() => setHoveredId(null)}
             >
-              <div
-                className={`w-1.5 h-1.5 rounded-sm ${
-                  logged ? 'bg-blue-500' : 'border border-zinc-700'
-                }`}
-              />
-              <span className="flex-1 text-sm">{activity.name}</span>
-              {streak > 0 && (
-                <span className="text-xs text-zinc-400">{streak}d</span>
+              <div className="h-8 flex items-center gap-3">
+                <div
+                  className={`w-1.5 h-1.5 rounded-sm ${
+                    logged ? 'bg-blue-500' : 'border border-zinc-700'
+                  }`}
+                />
+                <span className="flex-1 text-sm">{activity.name}</span>
+                {(isHovered || selected) && !logged && (
+                  <>
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        startEdit(activity)
+                      }}
+                      className="text-xs text-zinc-500 hover:text-zinc-300"
+                    >
+                      Edit
+                    </button>
+                    {deleteConfirmId === activity.id ? (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          deleteHabit(activity.id)
+                        }}
+                        className="text-xs text-red-400 hover:text-red-300"
+                      >
+                        Delete?
+                      </button>
+                    ) : (
+                      <button
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          setDeleteConfirmId(activity.id)
+                          setTimeout(() => setDeleteConfirmId(null), 3000)
+                        }}
+                        className="text-xs text-zinc-500 hover:text-red-400"
+                      >
+                        Delete
+                      </button>
+                    )}
+                  </>
+                )}
+                {streak > 0 && (
+                  <span className="text-xs text-zinc-400">{streak}d</span>
+                )}
+              </div>
+              {(isHovered || selected) && activity.description && (
+                <div className="text-xs text-zinc-600 ml-5 pb-1 line-clamp-2">
+                  {activity.description}
+                </div>
               )}
             </div>
           )
