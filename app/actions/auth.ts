@@ -1,41 +1,41 @@
 'use server'
 
 import { createClient } from '@/lib/supabase/server'
+import { redirect } from 'next/navigation'
+import { headers } from 'next/headers'
 
-export async function login(formData: FormData) {
-  const email = formData.get('email') as string | null
-
-  if (!email) {
-    return { ok: false, error: 'Email is required' }
-  }
-
+export async function signInWithGoogle() {
   const supabase = await createClient()
-
-  const { data, error } = await supabase.auth.signInWithOtp({
-    email,
+  const headersList = await headers()
+  const origin = headersList.get('origin') ?? 'http://localhost:3000'
+  
+  const { data, error } = await supabase.auth.signInWithOAuth({
+    provider: 'google',
     options: {
-      emailRedirectTo: 'http://localhost:3001/api/auth/callback',
+      redirectTo: `${origin}/auth/callback`,
+      queryParams: {
+        access_type: 'offline',
+        prompt: 'consent',
+      },
     },
   })
 
-  console.log('signInWithOtp result:', { data, error }) // ⭐ IMPORTANT
-
   if (error) {
-    // Return the *exact* message from Supabase
-    return { ok: false, error: error.message || 'Unknown Supabase error' }
+    console.error('Google OAuth error:', error)
+    throw error
   }
 
-  return { ok: true }
+  redirect(data.url)
 }
 
 export async function signOut() {
   const supabase = await createClient()
   const { error } = await supabase.auth.signOut()
-
+  
   if (error) {
     console.error('Sign out error:', error)
-    return { ok: false, error: error.message }
+    throw error
   }
 
-  return { ok: true }
+  redirect('/login')
 }
