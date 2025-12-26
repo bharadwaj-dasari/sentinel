@@ -11,6 +11,7 @@ type Recurrence = 'once' | 'daily' | 'weekly' | 'monthly' | 'custom_days'
 export default function ForgePage() {
   const [tab, setTab] = useState<Tab>('habits')
   const [name, setName] = useState('')
+  const [description, setDescription] = useState('') // ← ADDED
   const [importance, setImportance] = useState<Importance>('medium')
   const [targetFrequency, setTargetFrequency] = useState(7)
   const [recurrence, setRecurrence] = useState<Recurrence>('weekly')
@@ -33,6 +34,7 @@ export default function ForgePage() {
     const { error } = await supabase.from('activities').insert({
       user_id: user.id,
       name: name.trim(),
+      description: description.trim() || null, // ← ADDED
       importance,
       target_frequency: targetFrequency,
     })
@@ -40,6 +42,7 @@ export default function ForgePage() {
     if (!error) {
       showToast('Habit created')
       setName('')
+      setDescription('') // ← ADDED
       setImportance('medium')
       setTargetFrequency(7)
       inputRef.current?.focus()
@@ -115,13 +118,22 @@ export default function ForgePage() {
           type="text"
           value={name}
           onChange={e => setName(e.target.value)}
-          onKeyDown={e => e.key === 'Enter' && handleSubmit()}
+          onKeyDown={e => e.key === 'Enter' && !description && handleSubmit()} // ← MODIFIED (only submit if not in description)
           placeholder={tab === 'habits' ? 'Habit name' : 'Task name'}
           className="w-full bg-transparent border border-[#27272a] focus:border-[#3f3f46] outline-none px-3 py-2 text-[14px] rounded"
         />
 
         {tab === 'habits' && (
           <>
+            {/* ← ADDED DESCRIPTION TEXTAREA */}
+            <textarea
+              value={description}
+              onChange={e => setDescription(e.target.value)}
+              placeholder="Description (optional)"
+              rows={2}
+              className="w-full bg-transparent border border-[#27272a] focus:border-[#3f3f46] outline-none px-3 py-2 text-[14px] rounded resize-none"
+            />
+
             <div className="space-y-2">
               <label className="text-[12px] text-[#a1a1aa]">Importance</label>
               <select

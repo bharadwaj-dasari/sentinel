@@ -6,11 +6,11 @@ export default function DashboardLayout({
   children: React.ReactNode
 }) {
   return (
-    <>
+    <div className="h-screen flex flex-col bg-background">
       <Navigation />
-      <main className="min-h-screen bg-background">
+      <div className="flex-1 overflow-hidden">
         {children}
-      </main>
-    </>
+      </div>
+    </div>
   )
 }
